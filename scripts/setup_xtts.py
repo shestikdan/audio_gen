@@ -99,6 +99,7 @@ def download_xtts_model():
     try:
         print("Importing TTS...")
         from TTS.api import TTS
+        import os  # Добавляем импорт os здесь, чтобы он был доступен во всей функции
         
         # Create a reference voice file if none exists
         ref_wav = "samples/reference_voice.wav"
@@ -170,7 +171,6 @@ def download_xtts_model():
                 test_output = "test_sample.wav"
                 
                 # Try with speaker_wav instead of speaker_name
-                import os
                 # Look for any wav file to use as reference
                 wav_files = [f for f in os.listdir('.') if f.endswith('.wav')]
                 
