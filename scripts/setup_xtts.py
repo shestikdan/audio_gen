@@ -101,6 +101,9 @@ def download_xtts_model():
         from TTS.api import TTS
         import os  # Добавляем импорт os здесь, чтобы он был доступен во всей функции
         
+        # Автоматически принимаем лицензию XTTS
+        os.environ["COQUI_TOS_AGREED"] = "1"
+        
         # Create a reference voice file if none exists
         ref_wav = "samples/reference_voice.wav"
         if not os.path.exists(ref_wav) and not any(f.endswith('.wav') for f in os.listdir('samples')):
