@@ -257,7 +257,9 @@ def main():
     
     if not check_available_memory():
         print("\n⚠️ Memory check indicates potential issues")
-        response = input("Continue anyway? (y/n): ")
+        # Автоматический ответ "да" вместо запроса ввода
+        response = "y"  # Было: response = input("Continue anyway? (y/n): ")
+        print("Automatically continuing with setup...")
         if response.lower() != 'y':
             print("Setup aborted.")
             sys.exit(1)
