@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  lection_to_audio:
+    build: .
+    volumes:
+      - ./lections_text_base:/app/lections_text_base
+      - ./lections_text_mistral:/app/lections_text_mistral
+      - ./lections_audio:/app/lections_audio
+      - ./samples:/app/samples
+      # Persist model cache
+      - model_cache:/root/.cache/huggingface
+    environment:
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}  # For GPU support if available
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  model_cache: 
