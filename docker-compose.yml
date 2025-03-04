@@ -8,15 +8,9 @@ services:
       - ./lections_text_mistral:/app/lections_text_mistral
       - ./lections_audio:/app/lections_audio
       - ./samples:/app/samples
-      # Persist model caches
-      - model_cache:/root/.cache/huggingface
-      - tts_model_cache:/root/.local/share/tts  # XTTS model storage
+      - ./model_cache:/root/.cache/huggingface
+      - ./tts_models:/root/.local/share/tts
     environment:
-      - COQUI_TOS_AGREED=1  # Automatically accept XTTS license
-      - SKIP_XTTS_DOWNLOAD=0  # Download model on first run
-      # CPU-only mode (no GPU required)
+      - COQUI_TOS_AGREED=1
+      - SKIP_XTTS_DOWNLOAD=0
       - FORCE_CPU=1
-
-volumes:
-  model_cache:
-  tts_model_cache:  # Volume for XTTS models 
