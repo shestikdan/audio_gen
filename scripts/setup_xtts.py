@@ -267,14 +267,21 @@ def main():
             print("Setup aborted.")
             sys.exit(1)
     
-    if download_xtts_model():
-        print("\n✅ XTTS setup completed successfully!")
-        print("You can now use the TTS functionality with XTTS in your project.")
-        print("To test voice cloning, run: python voice_cloning_demo.py")
+    # Проверяем, нужно ли пропустить загрузку модели
+    if os.environ.get("SKIP_XTTS_DOWNLOAD") == "1":
+        print("\n⚠️ Skipping XTTS model download as SKIP_XTTS_DOWNLOAD is set")
+        print("You will need to manually download the model or mount it into the container")
+        print("Expected path: /root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2")
+        print("\n✅ XTTS setup completed with download skipped!")
     else:
-        print("\n❌ XTTS setup failed")
-        print("Please see INSTALLATION.md for troubleshooting information.")
-        sys.exit(1)
+        if download_xtts_model():
+            print("\n✅ XTTS setup completed successfully!")
+            print("You can now use the TTS functionality with XTTS in your project.")
+            print("To test voice cloning, run: python voice_cloning_demo.py")
+        else:
+            print("\n❌ XTTS setup failed")
+            print("Please see INSTALLATION.md for troubleshooting information.")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
