@@ -8,17 +8,15 @@ services:
       - ./lections_text_mistral:/app/lections_text_mistral
       - ./lections_audio:/app/lections_audio
       - ./samples:/app/samples
-      # Persist model cache
+      # Persist model caches
       - model_cache:/root/.cache/huggingface
+      - tts_model_cache:/root/.local/share/tts  # XTTS model storage
     environment:
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}  # For GPU support if available
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - COQUI_TOS_AGREED=1  # Automatically accept XTTS license
+      - SKIP_XTTS_DOWNLOAD=0  # Download model on first run
+      # CPU-only mode (no GPU required)
+      - FORCE_CPU=1
 
 volumes:
-  model_cache: 
+  model_cache:
+  tts_model_cache:  # Volume for XTTS models 
