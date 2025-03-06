@@ -10,7 +10,15 @@ services:
       - ./samples:/app/samples
       - ./model_cache:/root/.cache/huggingface
       - ./tts_models:/root/.local/share/tts
+      - ./silero_model.pt:/app/silero_model.pt
     environment:
       - COQUI_TOS_AGREED=1
       - SKIP_XTTS_DOWNLOAD=0
       - FORCE_CPU=1
+      - PYTHONUNBUFFERED=1
+      - NNPACK_IGNORE=1
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    restart: unless-stopped
