@@ -31,6 +31,11 @@ WORKDIR /app
 # Обновление pip для лучшей совместимости
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# Создаем заглушку для distutils.msvccompiler для обхода ошибки
+RUN mkdir -p /tmp/msvccompiler_fix/distutils && \
+    echo "def get_build_version(): return ''" > /tmp/msvccompiler_fix/distutils/msvccompiler.py && \
+    echo "from distutils.msvccompiler import get_build_version  # заглушка" > /tmp/msvccompiler_fix/__init__.py
+
 # Предустановка NumPy (заранее для предотвращения проблем)
 RUN pip install --no-cache-dir numpy==1.22.0
 
@@ -45,8 +50,8 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Создаем патч для исправления проблемы с PyTorch
 RUN echo 'import sys\nimport torch\n\n# Патч для функции torch.load\noriginal_torch_load = torch.load\ndef patched_torch_load(f, *args, **kwargs):\n    # Всегда устанавливаем weights_only=False\n    if "weights_only" not in kwargs:\n        kwargs["weights_only"] = False\n    return original_torch_load(f, *args, **kwargs)\n\n# Заменяем оригинальную функцию на нашу патченную версию\ntorch.load = patched_torch_load\n\ntry:\n    # Добавляем безопасные классы для десериализации\n    torch.serialization._get_safe_globals().add("TTS.tts.configs.xtts_config.XttsConfig")\n    print("✅ PyTorch патч для torch.load применен успешно")\nexcept Exception as e:\n    print(f"⚠️ Не удалось настроить безопасные глобалы: {e}, но продолжаем работу")' > /app/torch_patch.py
 
-# Установка TTS через pip (более стабильный метод)
-RUN pip install --no-cache-dir TTS==0.17.0 && \
+# Установка TTS через pip с заглушкой для msvccompiler
+RUN PYTHONPATH=/tmp/msvccompiler_fix:$PYTHONPATH pip install --no-cache-dir TTS==0.16.0 && \
     pip cache purge
 
 # Создание необходимых директорий
