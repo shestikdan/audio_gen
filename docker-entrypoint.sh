@@ -3,6 +3,14 @@ set -e
 
 echo "=== Начало инициализации контейнера ==="
 
+# Проверка и обновление PIP и базовых пакетов
+echo "* Проверка и обновление базовых пакетов..."
+pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Проверка и установка критических зависимостей
+echo "* Проверка критических зависимостей..."
+pip install --no-cache-dir numpy==1.22.0 torch==2.5.0 torchaudio==2.5.0 pyloudnorm
+
 # Проверка переменной окружения для поддержки PyTorch
 if [ "$PYTORCH_WEIGHTS_ONLY" != "0" ]; then
   echo "⚠️ ВНИМАНИЕ: PYTORCH_WEIGHTS_ONLY не установлен в 0. Устанавливаем принудительно."
@@ -11,7 +19,7 @@ fi
 
 # Применяем патч к скрипту setup_xtts.py для совместимости с PyTorch
 echo "* Применяем патч для setup_xtts.py..."
-sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\nimport torch_patch  # применяем патч PyTorch\n/' scripts/setup_xtts.py
+sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\ntry:\n    import torch_patch  # применяем патч PyTorch\nexcept Exception as e:\n    print(f"Предупреждение: не удалось применить патч PyTorch: {e}")\n/' scripts/setup_xtts.py
 
 # Устанавливаем необходимые переменные окружения
 echo "* Настройка переменных окружения..."
@@ -23,7 +31,13 @@ echo "* Проверка доступной памяти..."
 free -h
 echo "Рекомендуется минимум 4GB RAM для стабильной работы."
 
-# Проверка переменных окружения
+# Проверка наличия TTS и установка при необходимости
+if ! python -c "import TTS" 2>/dev/null; then
+  echo "* Устанавливаем TTS..."
+  pip install --no-cache-dir TTS==0.17.0
+fi
+
+# Проверка переменных окружения для XTTS
 if [ "$SKIP_XTTS_DOWNLOAD" = "0" ]; then
   echo "* Загрузка моделей XTTS..."
   
@@ -33,30 +47,28 @@ if [ "$SKIP_XTTS_DOWNLOAD" = "0" ]; then
     pip install pyloudnorm
   fi
   
-  # Запускаем скрипт настройки с применением патча
-  python scripts/setup_xtts.py || {
-    echo "Предупреждение: загрузка моделей XTTS не удалась."
-    echo "Пробуем альтернативный метод установки..."
-    
-    # Альтернативный метод загрузки модели
-    python -c "
-import torch, sys
-from pathlib import Path
-
-# Монкипатчим torch.load
-original_torch_load = torch.load
-torch.load = lambda f, *args, **kwargs: original_torch_load(f, weights_only=False, *args, **kwargs)
-print('Применен монкипатч для torch.load')
-
+  # Создаем простой скрипт для загрузки модели
+  echo "import torch, sys
 try:
     from TTS.api import TTS
-    print('Пытаемся загрузить модель XTTS...')
-    tts = TTS('tts_models/multilingual/multi-dataset/xtts_v2', progress_bar=True)
-    print('✅ Модель TTS успешно загружена и инициализирована!')
+    print('Загрузка модели XTTS...')
+    # Устанавливаем weights_only=False
+    original_torch_load = torch.load
+    torch.load = lambda f, *args, **kwargs: original_torch_load(f, weights_only=False, *args, **kwargs)
+    
+    # Загружаем модель
+    tts = TTS('tts_models/multilingual/multi-dataset/xtts_v2')
+    print('✅ Модель XTTS успешно загружена!')
 except Exception as e:
-    print(f'❌ Не удалось загрузить модель: {e}')
+    print(f'❌ Ошибка при загрузке модели: {e}')
     sys.exit(1)
-" || echo "❌ Предупреждение: альтернативная загрузка также не удалась."
+" > /app/load_model.py
+  
+  # Запускаем скрипт загрузки модели
+  python /app/load_model.py || {
+    echo "⚠️ Не удалось загрузить модель XTTS. Пробуем альтернативный путь..."
+    # Запускаем скрипт настройки
+    python scripts/setup_xtts.py || echo "❌ Все попытки загрузки модели не удались."
   }
 else
   echo "* Пропуск загрузки моделей XTTS (SKIP_XTTS_DOWNLOAD=$SKIP_XTTS_DOWNLOAD)"

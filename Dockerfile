@@ -17,11 +17,22 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     git \
     wget \
+    build-essential \
+    python3-dev \
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Создание рабочей директории
 WORKDIR /app
+
+# Обновление pip для лучшей совместимости
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Предустановка NumPy (заранее для предотвращения проблем)
+RUN pip install --no-cache-dir numpy==1.22.0
 
 # Оптимизация слоев кеша - разделяем установку зависимостей
 COPY requirements.txt .
@@ -32,10 +43,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     rm -rf /root/.cache/pip
 
 # Создаем патч для исправления проблемы с PyTorch
-RUN echo 'import sys\nimport torch\n\n# Патч для функции torch.load\noriginal_torch_load = torch.load\ndef patched_torch_load(f, *args, **kwargs):\n    # Всегда устанавливаем weights_only=False\n    if "weights_only" not in kwargs:\n        kwargs["weights_only"] = False\n    return original_torch_load(f, *args, **kwargs)\n\n# Заменяем оригинальную функцию на нашу патченную версию\ntorch.load = patched_torch_load\n\n# Добавляем безопасные классы для десериализации\ntorch.serialization._get_safe_globals().add("TTS.tts.configs.xtts_config.XttsConfig")\n\nprint("✅ PyTorch патч для torch.load применен успешно")' > /app/torch_patch.py
+RUN echo 'import sys\nimport torch\n\n# Патч для функции torch.load\noriginal_torch_load = torch.load\ndef patched_torch_load(f, *args, **kwargs):\n    # Всегда устанавливаем weights_only=False\n    if "weights_only" not in kwargs:\n        kwargs["weights_only"] = False\n    return original_torch_load(f, *args, **kwargs)\n\n# Заменяем оригинальную функцию на нашу патченную версию\ntorch.load = patched_torch_load\n\ntry:\n    # Добавляем безопасные классы для десериализации\n    torch.serialization._get_safe_globals().add("TTS.tts.configs.xtts_config.XttsConfig")\n    print("✅ PyTorch патч для torch.load применен успешно")\nexcept Exception as e:\n    print(f"⚠️ Не удалось настроить безопасные глобалы: {e}, но продолжаем работу")' > /app/torch_patch.py
 
-# Установка TTS из GitHub для обеспечения совместимости
-RUN pip install --no-cache-dir git+https://github.com/coqui-ai/TTS@v0.17.0 && \
+# Установка TTS через pip (более стабильный метод)
+RUN pip install --no-cache-dir TTS==0.17.0 && \
     pip cache purge
 
 # Создание необходимых директорий
@@ -48,7 +59,7 @@ COPY README.md ./
 RUN touch .env
 
 # Патчим основной скрипт для применения исправления PyTorch
-RUN sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\nimport torch_patch  # применяем патч PyTorch\n/' scripts/lection_to_audio.py
+RUN sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\ntry:\n    import torch_patch  # применяем патч PyTorch\nexcept Exception as e:\n    print(f"Предупреждение: не удалось применить патч PyTorch: {e}")\n/' scripts/lection_to_audio.py
 
 # Настройка прав доступа
 RUN chmod +x scripts/setup_xtts.py scripts/lection_to_audio.py

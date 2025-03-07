@@ -1,5 +1,6 @@
 # Core dependencies
-numpy>=1.20.0
+# Фиксируем конкретную стабильную версию NumPy
+numpy==1.22.0
 # Фиксируем версию PyTorch до 2.5.x для совместимости с TTS
 torch==2.5.0
 torchaudio==2.5.0
