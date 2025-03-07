@@ -51,6 +51,24 @@ show_logs() {
   docker-compose logs -f
 }
 
+# Очистка системы для освобождения места на диске
+clean_system() {
+  echo "=== Очистка системы для освобождения места ==="
+  
+  # Очистка apt кэша
+  sudo apt-get clean
+  sudo apt-get autoremove -y
+  
+  # Удаление старых логов
+  sudo find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
+  sudo find /var/log -type f -name "*.1" -delete 2>/dev/null || true
+  
+  # Глубокая очистка Docker
+  docker system prune -a --volumes -f
+  
+  echo "✅ Система очищена"
+}
+
 # Главное меню
 menu() {
   clear
@@ -62,9 +80,10 @@ menu() {
   echo "5. Запустить контейнер"
   echo "6. Показать логи"
   echo "7. Выполнить полный процесс развертывания (шаги 1-5)"
-  echo "8. Выход"
+  echo "8. Очистить систему (освободить место на диске)"
+  echo "9. Выход"
   echo
-  read -p "Выберите действие (1-8): " choice
+  read -p "Выберите действие (1-9): " choice
 
   case $choice in
     1) update_repo; read -p "Нажмите Enter для продолжения..."; menu ;;
@@ -72,7 +91,12 @@ menu() {
     3) setup_dirs; read -p "Нажмите Enter для продолжения..."; menu ;;
     4) build_image; read -p "Нажмите Enter для продолжения..."; menu ;;
     5) run_container; read -p "Нажмите Enter для продолжения..."; menu ;;
-    6) show_logs; menu ;;
+    6) 
+       show_logs
+       # После выхода из логов (Ctrl+C) возвращаемся в меню
+       read -p "Логи закрыты. Нажмите Enter для возврата в меню..."
+       menu 
+       ;;
     7) 
        update_repo
        clean_docker
@@ -81,7 +105,8 @@ menu() {
        run_container
        read -p "Нажмите Enter для продолжения..."; menu 
        ;;
-    8) exit 0 ;;
+    8) clean_system; read -p "Нажмите Enter для продолжения..."; menu ;;
+    9) exit 0 ;;
     *) echo "Неверный выбор"; read -p "Нажмите Enter для продолжения..."; menu ;;
   esac
 }
