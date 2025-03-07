@@ -3,8 +3,9 @@ set -e
 
 echo "=== Начало инициализации контейнера ==="
 
-# Устанавливаем флаг, что мы хотим использовать реальный TTS
-export REAL_TTS_AVAILABLE=1
+# Устанавливаем флаг, что мы используем только Silero TTS
+export USE_SILERO_ONLY=1
+export REAL_TTS_AVAILABLE=0
 
 # Создаем заглушку для distutils.msvccompiler для обхода ошибки
 mkdir -p /tmp/msvccompiler_fix/distutils
@@ -50,231 +51,186 @@ else
   fi
 fi
 
+# Исправление проблемы с директорией silero_model.pt
+if [ -d "/app/silero_model.pt" ]; then
+  echo "* ⚠️ Обнаружена директория вместо файла: /app/silero_model.pt. Исправляем..."
+  rm -rf /app/silero_model.pt
+fi
+
+# Установка и настройка Silero
+echo "* Установка и настройка Silero модели..."
+# Устанавливаем необходимые для Silero зависимости
+pip install --no-cache-dir omegaconf
+
 # Попытка загрузки силеро-модели
 if [ -f "/app/silero_model.pt" ]; then
   echo "* ✅ Найдена модель Silero"
 else
-  echo "* ⚠️ Внимание: модель Silero не найдена в /app/silero_model.pt. Пробуем загрузить демо-модель..."
+  echo "* Загрузка модели Silero..."
   mkdir -p /root/.cache/torch/hub/snakers4_silero-models_master/
-  wget -q -O /app/silero_model.pt https://models.silero.ai/models/tts/ru/v4_ru.pt || echo "Не удалось загрузить модель Silero"
-fi
-
-# Установка TTS
-echo "* Установка TTS для синтеза речи..."
-TTS_INSTALLED=0
-
-# Сначала пробуем wheel для Linux
-mkdir -p /tmp/wheels
-cd /tmp/wheels
-wget -q -O TTS-0.16.0-py3-none-any.whl https://files.pythonhosted.org/packages/8b/7f/cd31b87d57f6f7c17adf7bac96eedd099e2b71b42c7eece2fb12e2fcf607/TTS-0.16.0-py3-none-any.whl || true
-
-if [ -f "TTS-0.16.0-py3-none-any.whl" ]; then
-  echo "* Устанавливаем TTS из скачанного wheel-файла..."
-  pip install --no-deps TTS-0.16.0-py3-none-any.whl && TTS_INSTALLED=1
+  wget -q -O /app/silero_model.pt https://models.silero.ai/models/tts/ru/v4_ru.pt
   
-  if [ $TTS_INSTALLED -eq 1 ]; then
-    echo "* ✅ TTS установлен из wheel-файла"
+  if [ -f "/app/silero_model.pt" ]; then
+    echo "* ✅ Модель Silero успешно загружена"
+  else
+    echo "* ⚠️ Ошибка загрузки модели Silero. Пробуем альтернативный источник..."
+    wget -q -O /app/silero_model.pt https://github.com/snakers4/silero-models/releases/download/v4_tts_models/ru_v4.pt
+    
+    if [ -f "/app/silero_model.pt" ]; then
+      echo "* ✅ Модель Silero успешно загружена из альтернативного источника"
+    else
+      echo "* ❌ Не удалось загрузить модель Silero. Создаем заглушку..."
+      echo "Заглушка Silero модели" > /app/silero_model.pt
+    fi
   fi
 fi
 
-# Если не удалось через wheel, пробуем через pip с обходом msvccompiler
-if [ $TTS_INSTALLED -eq 0 ]; then
-  echo "* Устанавливаем TTS через pip с обходом msvccompiler..."
-  PYTHONPATH=/tmp/msvccompiler_fix:$PYTHONPATH pip install --no-cache-dir TTS==0.16.0 && TTS_INSTALLED=1
-  
-  if [ $TTS_INSTALLED -eq 1 ]; then
-    echo "* ✅ TTS установлен через pip"
-  fi
-fi
-
-# Если все еще не удалось, устанавливаем зависимости для работы с аудио и gTTS как альтернативу
-if [ $TTS_INSTALLED -eq 0 ]; then
-  echo "* TTS не удалось установить. Устанавливаем gTTS как альтернативу..."
-  pip install --no-cache-dir pydub scipy soundfile librosa unidic-lite phonemizer gTTS && {
-    echo "* ✅ Базовые зависимости и gTTS установлены"
-    
-    # Создаем минимальную структуру папок для моделей
-    mkdir -p /root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2
-    
-    # Создаем патч для использования gTTS вместо TTS при необходимости
-    cat > /app/gtts_fallback.py << 'EOL'
+# Создаем обертку для использования Silero
+echo "* Создание обертки для Silero TTS..."
+cat > /app/silero_tts.py << 'EOL'
 import os
 import sys
 import torch
 import warnings
 from pathlib import Path
 
-# Проверяем, доступен ли модуль TTS
-try:
-    import TTS
-    print("✅ Модуль TTS найден, используем настоящий синтез речи")
-except ImportError:
-    print("⚠️ Модуль TTS не найден, используем gTTS как альтернативу")
-    # Загружаем gTTS для синтеза
-    from gtts import gTTS
+print("🔄 Загрузка Silero TTS для синтеза речи...")
+
+# Функция для инициализации модели Silero
+def init_silero_model():
+    try:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model_path = '/app/silero_model.pt'
+        
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(f"Модель не найдена: {model_path}")
+            
+        if os.path.getsize(model_path) < 1000000:  # Размер меньше 1MB? Вероятно, это не модель
+            raise ValueError(f"Файл {model_path} слишком маленький для модели")
+        
+        print(f"🔄 Загрузка модели Silero из {model_path} на {device}...")
+        model = torch.package.PackageImporter(model_path).load_pickle("tts_models", "model")
+        model.to(device)
+        print("✅ Модель Silero успешно загружена")
+        return model, device
+        
+    except Exception as e:
+        print(f"❌ Ошибка при загрузке модели Silero: {e}")
+        return None, None
+
+silero_model, silero_device = init_silero_model()
+
+# Класс-обертка для Silero, совместимый с TTS API
+class SileroTTSWrapper:
+    def __init__(self, model_name=None, **kwargs):
+        self.model = silero_model
+        self.device = silero_device
+        self.sample_rate = 48000  # Частота дискретизации для Silero TTS
+        print(f"🔄 Инициализация Silero TTS")
+        
+        if self.model is None:
+            warnings.warn("Silero модель не загружена. Используется заглушка.")
     
-    # Создаем класс-обертку для совместимости с API TTS
-    class GTTSWrapper:
-        def __init__(self, model_name=None, **kwargs):
-            self.model_name = model_name
-            self.device = "cpu"
-            print(f"🔄 Инициализация gTTS вместо TTS для модели: {model_name}")
-        
-        def to(self, device):
-            self.device = device
-            return self
-        
-        def tts_to_file(self, text, output_file, **kwargs):
-            print(f"🔊 Синтез речи с gTTS: {text[:50]}...")
+    def to(self, device):
+        print(f"🔄 Перемещение модели на устройство: {device}")
+        if self.model is not None:
             try:
-                # Параметры по умолчанию
-                lang = kwargs.get("language", "ru")
-                slow = kwargs.get("slow", False)
-                
-                # Создаем файл через gTTS
-                tts = gTTS(text=text, lang=lang, slow=slow)
-                os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
-                tts.save(output_file)
-                print(f"✅ Файл создан: {output_file}")
-                return output_file
+                self.model.to(device)
+                self.device = device
             except Exception as e:
-                print(f"❌ Ошибка gTTS: {e}")
+                print(f"❌ Ошибка при перемещении модели: {e}")
+        return self
+    
+    def tts_to_file(self, text, output_file, **kwargs):
+        print(f"🔊 Синтез речи с Silero: {text[:50]}...")
+        try:
+            # Убедимся, что директория существует
+            os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+            
+            if self.model is None:
                 # Создаем пустой аудиофайл при ошибке
                 import wave
                 import struct
                 
-                os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
                 duration = 1  # seconds
-                framerate = 24000  # Hz
+                framerate = 48000  # Hz
                 with wave.open(output_file, "w") as wav_file:
                     wav_file.setparams((1, 2, framerate, framerate, "NONE", "not compressed"))
                     for i in range(framerate):
                         packed_value = struct.pack("<h", 0)
                         wav_file.writeframes(packed_value)
+                print(f"⚠️ Создан пустой аудиофайл (Silero не загружен): {output_file}")
                 return output_file
+                
+            # Получаем параметры из kwargs
+            speaker = kwargs.get('speaker', 'xenia')
+            sample_rate = kwargs.get('sample_rate', self.sample_rate)
+            put_accent = kwargs.get('put_accent', True)
+            put_yo = kwargs.get('put_yo', True)
+            
+            # Генерация речи с Silero
+            audio = self.model.apply_tts(
+                text=text,
+                speaker=speaker,
+                sample_rate=sample_rate,
+                put_accent=put_accent,
+                put_yo=put_yo
+            )
+            
+            # Конвертация в NumPy и сохранение
+            audio_np = audio.cpu().numpy()
+            
+            import soundfile as sf
+            sf.write(output_file, audio_np, sample_rate)
+            print(f"✅ Аудиофайл создан: {output_file}")
+            
+            return output_file
+            
+        except Exception as e:
+            print(f"❌ Ошибка при синтезе речи с Silero: {e}")
+            # Создаем пустой аудиофайл при ошибке
+            import wave
+            import struct
+            
+            os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+            duration = 1  # seconds
+            framerate = 48000  # Hz
+            with wave.open(output_file, "w") as wav_file:
+                wav_file.setparams((1, 2, framerate, framerate, "NONE", "not compressed"))
+                for i in range(framerate):
+                    packed_value = struct.pack("<h", 0)
+                    wav_file.writeframes(packed_value)
+            print(f"⚠️ Создан пустой аудиофайл из-за ошибки: {output_file}")
+            return output_file
     
-    # Замещаем модуль TTS нашей реализацией
-    class FakeTTSModule:
-        TTS = GTTSWrapper
+    # Дополнительные методы для совместимости
+    @staticmethod
+    def list_models():
+        return ["silero_model"]
+    
+    def is_multi_speaker(self):
+        return True
+    
+    def get_speaker_ids(self):
+        return ["xenia", "baya", "kseniya", "eugene", "random"]
+
+# Замещаем модуль TTS нашей реализацией с Silero
+if "TTS" not in sys.modules:
+    class SileroTTSModule:
+        TTS = SileroTTSWrapper
         
         @staticmethod
         def list_models():
-            return ["tts_models/multilingual/multi-dataset/xtts_v2"]
+            return ["silero_tts"]
     
     # Регистрируем модули
-    sys.modules["TTS"] = FakeTTSModule
-    sys.modules["TTS.api"] = FakeTTSModule
+    sys.modules["TTS"] = SileroTTSModule
+    sys.modules["TTS.api"] = SileroTTSModule
 EOL
-    
-    # Применяем патч для скриптов
-    sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\ntry:\n    import gtts_fallback  # загружаем альтернативу TTS\nexcept Exception as e:\n    print(f"Предупреждение: {e}")\n/' scripts/lection_to_audio.py
-    sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\ntry:\n    import gtts_fallback  # загружаем альтернативу TTS\nexcept Exception as e:\n    print(f"Предупреждение: {e}")\n/' scripts/text_update_agent.py
-  }
-fi
 
-# Проверка переменных окружения для XTTS
-if [ "$SKIP_XTTS_DOWNLOAD" = "0" ]; then
-  echo "* Загрузка моделей XTTS..."
-  
-  # Пробуем установить pyloudnorm, если его нет
-  if ! python -c "import pyloudnorm" 2>/dev/null; then
-    echo "* Устанавливаем отсутствующую зависимость pyloudnorm..."
-    pip install pyloudnorm
-  fi
-  
-  # Проверяем наличие директории для моделей
-  mkdir -p /root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2
-  
-  # Создаем скрипт для загрузки модели
-  cat > /app/download_model.py << 'EOL'
-#!/usr/bin/env python3
-import os
-import sys
-import torch
-import requests
-from pathlib import Path
-from tqdm import tqdm
-
-# Патч для torch.load
-original_torch_load = torch.load
-torch.load = lambda f, *args, **kwargs: original_torch_load(f, weights_only=False, *args, **kwargs)
-
-# Создаем нужные директории
-os.makedirs("/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2", exist_ok=True)
-
-print("✓ Начинаем ручную загрузку модели XTTS v2")
-
-# Файлы для загрузки
-model_files = [
-    "config.json",
-    "model_file.pth",
-    "vocab.json",
-    "speakers_map.json"
-]
-
-# Mirrors для моделей
-mirrors = [
-    "https://coqui.gateway.scarf.sh/hf-coqui/XTTS-v2/",
-    "https://huggingface.co/coqui/XTTS-v2/resolve/main/",
-    "https://github.com/coqui-ai/TTS/raw/main/models/multilingual/multi-dataset/xtts_v2/"
-]
-
-for file in model_files:
-    target_path = f"/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/{file}"
-    
-    if os.path.exists(target_path):
-        print(f"✓ Файл {file} уже существует, пропускаем")
-        continue
-    
-    downloaded = False
-    for mirror in mirrors:
-        if downloaded:
-            break
-            
-        print(f"⬇️ Загрузка {file} из {mirror}...")
-        try:
-            response = requests.get(f"{mirror}{file}", stream=True)
-            response.raise_for_status()
-            
-            total_size = int(response.headers.get('content-length', 0))
-            block_size = 1024
-            
-            with open(target_path, 'wb') as f, tqdm(
-                    total=total_size, unit='B', unit_scale=True, unit_divisor=1024,
-                    desc=file) as pbar:
-                for data in response.iter_content(block_size):
-                    f.write(data)
-                    pbar.update(len(data))
-                    
-            print(f"✓ Файл {file} успешно загружен")
-            downloaded = True
-        except Exception as e:
-            print(f"❌ Ошибка при загрузке {file} из {mirror}: {e}")
-            continue
-            
-    if not downloaded:
-        print(f"❌ Не удалось загрузить {file} ни из одного источника")
-
-if all(os.path.exists(f"/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/{file}") for file in model_files):
-    print("✓ Все файлы модели XTTS успешно загружены")
-else:
-    print("⚠️ Некоторые файлы модели XTTS не были загружены")
-EOL
-  
-  # Запускаем скрипт загрузки модели
-  python /app/download_model.py || {
-    echo "⚠️ Не удалось загрузить модель XTTS вручную."
-    
-    # Создаем фиктивный файл model_info.json, если модель не удалось скачать
-    if [ ! -f "/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/model_file.pth" ]; then
-      echo '{"description": "XTTS v2 dummy model", "language": ["ru"], "name": "xtts_v2"}' > "/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/model_info.json"
-      touch "/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/model_file.pth"
-      echo "⚠️ Создан фиктивный файл модели для обхода ошибок"
-    fi
-  }
-else
-  echo "* Пропуск загрузки моделей XTTS (SKIP_XTTS_DOWNLOAD=$SKIP_XTTS_DOWNLOAD)"
-fi
+# Применяем патч для скриптов
+sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\ntry:\n    import silero_tts  # загружаем Silero TTS\nexcept Exception as e:\n    print(f"Предупреждение: не удалось загрузить Silero TTS: {e}")\n/' scripts/lection_to_audio.py
+sed -i '1s/^/import sys\nsys.path.insert(0, "\/app")\ntry:\n    import silero_tts  # загружаем Silero TTS\nexcept Exception as e:\n    print(f"Предупреждение: не удалось загрузить Silero TTS: {e}")\n/' scripts/text_update_agent.py
 
 echo "=== Инициализация контейнера завершена ==="
 
