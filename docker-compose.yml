@@ -22,3 +22,10 @@ services:
         limits:
           memory: 8G
     restart: unless-stopped
+    # Используем healthcheck для проверки статуса контейнера
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/root/.local/share/tts') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

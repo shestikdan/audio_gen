@@ -6,6 +6,8 @@ ENV PYTHONPATH=/app
 ENV COQUI_TOS_AGREED=1
 ENV NNPACK_IGNORE=1
 ENV FORCE_CPU=1
+# Предотвращаем загрузку модели во время сборки
+ENV SKIP_XTTS_DOWNLOAD=1
 
 # Установка системных зависимостей
 RUN apt-get update && apt-get install -y \
@@ -18,8 +20,10 @@ RUN apt-get update && apt-get install -y \
 # Создание рабочей директории
 WORKDIR /app
 
-# Копирование requirements и установка зависимостей
+# Оптимизация слоев кеша - разделяем установку зависимостей
 COPY requirements.txt .
+
+# Установка минимальных необходимых зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Установка TTS из GitHub для обеспечения совместимости
@@ -28,8 +32,10 @@ RUN pip install --no-cache-dir git+https://github.com/coqui-ai/TTS
 # Создание необходимых директорий
 RUN mkdir -p lections_text_base lections_text_mistral lections_audio samples model_cache
 
-# Копирование всего проекта
-COPY . .
+# Копирование всего проекта (за исключением больших файлов)
+COPY scripts/ ./scripts/
+COPY .env ./
+COPY README.md ./
 
 # Настройка прав доступа
 RUN chmod +x scripts/setup_xtts.py scripts/lection_to_audio.py
@@ -37,9 +43,12 @@ RUN chmod +x scripts/setup_xtts.py scripts/lection_to_audio.py
 # Создание пользовательских директорий для кеша моделей
 RUN mkdir -p /root/.cache/huggingface /root/.local/share/tts
 
-# Установка контрольных точек для TTS
-# Этот шаг будет пропущен если SKIP_XTTS_DOWNLOAD=1
-RUN if [ "$SKIP_XTTS_DOWNLOAD" != "1" ]; then python scripts/setup_xtts.py; fi
+# Создаем точку входа для инициализации
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+# Используем entrypoint для инициализации при запуске
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Выполнение скрипта по умолчанию
 CMD ["python", "scripts/lection_to_audio.py"] 
