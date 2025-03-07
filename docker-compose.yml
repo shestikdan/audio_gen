@@ -17,6 +17,7 @@ services:
       - FORCE_CPU=1
       - PYTHONUNBUFFERED=1
       - NNPACK_IGNORE=1
+      - PYTORCH_WEIGHTS_ONLY=0
     deploy:
       resources:
         limits:
@@ -29,3 +30,20 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+      
+  # Новый сервис для text_update_agent
+  text_update_agent:
+    build: .
+    command: python scripts/text_update_agent.py
+    volumes:
+      - ./lections_text_base:/app/lections_text_base
+      - ./lections_text_mistral:/app/lections_text_mistral
+      - ./samples:/app/samples
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    restart: "no"
