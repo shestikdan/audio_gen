@@ -34,8 +34,18 @@ export TTS_CHECKPOINT_CONFIG_COMPAT=1
 
 # Проверка доступной памяти
 echo "* Проверка доступной памяти..."
-free -h
-echo "Рекомендуется минимум 4GB RAM для стабильной работы."
+if command -v free &> /dev/null; then
+  free -h
+  echo "Рекомендуется минимум 4GB RAM для стабильной работы."
+else
+  echo "Команда 'free' недоступна. Пропускаем проверку памяти."
+  echo "Рекомендуется минимум 4GB RAM для стабильной работы."
+  
+  # Альтернативная проверка памяти через /proc/meminfo
+  if [ -f "/proc/meminfo" ]; then
+    echo "Доступно приблизительно $(grep -i memtotal /proc/meminfo | awk '{print $2/1024/1024}') GB RAM"
+  fi
+fi
 
 # Попытка загрузки силеро-модели
 if [ -f "/app/silero_model.pt" ]; then
@@ -181,6 +191,9 @@ else
 fi
 
 echo "=== Инициализация контейнера завершена ==="
+
+# Возвращаемся в рабочую директорию
+cd /app
 
 # Запуск переданной команды с правильными переменными окружения
 export PYTORCH_WEIGHTS_ONLY=0

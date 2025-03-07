@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     libblas-dev \
     liblapack-dev \
     gfortran \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
